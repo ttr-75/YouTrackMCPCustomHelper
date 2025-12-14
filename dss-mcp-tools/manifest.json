@@ -1,0 +1,6 @@
+{
+  "name": "dss-mcp-tools",
+  "title": "DSS MCP Tools",
+  "description": "Custom YouTrack MCP tools for DSS workflow (shared tags, issue tagging, etc.)",
+  "aiToolPrefix": "dss"
+}
