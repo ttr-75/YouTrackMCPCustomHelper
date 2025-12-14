@@ -50,18 +50,23 @@ function pickBestTag(candidates, shareGroup) {
     return best;
 }
 
-function ensureShare(tag, shareGroup) {
+function ensureShare(tag, shareGroupId) {
     const errors = [];
     let changed = false;
 
-    // Tag exposes permitted* sets (recommended in docs)
+    // Tag exposes deprecated but working fields (API docs)
     const folder = tag.folder || tag;
 
-    try { changed = setAddGroupIfMissing(folder.permittedReadUserGroups, shareGroup) || changed; }
-    catch (e) { errors.push('permittedReadUserGroups: ' + e); }
+    // Use deprecated but working fields visibleFor and updateableBy with group ID
+    try {
+        folder.visibleFor = { id: shareGroupId };
+        changed = true;
+    } catch (e) { errors.push('visibleFor: ' + e); }
 
-    try { changed = setAddGroupIfMissing(folder.permittedTagUserGroups, shareGroup) || changed; }
-    catch (e) { errors.push('permittedTagUserGroups: ' + e); }
+    try {
+        folder.updateableBy = { id: shareGroupId };
+        changed = true;
+    } catch (e) { errors.push('updateableBy: ' + e); }
 
     return { changed, errors };
 }
@@ -93,9 +98,21 @@ exports.aiTool = {
         const applyUpdates = (typeof ctx.arguments.applyUpdates === 'boolean') ? ctx.arguments.applyUpdates : true;
         const doApply = (mode === 'apply') && applyUpdates;
 
-        const shareGroupName = (ctx.arguments.shareGroupName || DEFAULT_SHARE_GROUP).trim();
-        const shareGroup = entities.UserGroup.findByName(shareGroupName); //
-        if (!shareGroup) throw new Error(`UserGroup not found: "${shareGroupName}"`);
+        // Use shareGroupId directly if provided, otherwise load group by name
+        let shareGroupId = (ctx.arguments.shareGroupId || '').trim();
+        let shareGroup = null;
+        let shareGroupName = '';
+
+        if (shareGroupId) {
+            // Direct ID provided - use it without loading the group
+            shareGroupName = shareGroupId; // Use ID as name for logging
+        } else {
+            // Load group by name
+            shareGroupName = (ctx.arguments.shareGroupName || DEFAULT_SHARE_GROUP).trim();
+            shareGroup = entities.UserGroup.findByName(shareGroupName);
+            if (!shareGroup) throw new Error(`UserGroup not found: "${shareGroupName}"`);
+            shareGroupId = shareGroup.id;
+        }
 
         const tagNames = distinct(asArray(ctx.arguments.tagNames).map(normalize).filter(Boolean));
 
@@ -119,7 +136,7 @@ exports.aiTool = {
                 res.created = true;
             }
 
-            const shareRes = ensureShare(tag, shareGroup);
+            const shareRes = ensureShare(tag, shareGroupId);
             res.shareUpdated = shareRes.changed;
             res.shareUpdateErrors = shareRes.errors;
 

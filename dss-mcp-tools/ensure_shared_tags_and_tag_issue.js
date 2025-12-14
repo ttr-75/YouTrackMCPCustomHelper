@@ -31,25 +31,33 @@ function pickBestTag(candidates, shareGroup) {
     return best;
 }
 
-function ensureShare(tag, shareGroup) {
+function ensureShare(tag, shareGroupId) {
     const errors = [];
     let changed = false;
     const folder = tag.folder || tag;
 
-    try { changed = setAddGroupIfMissing(folder.permittedReadUserGroups, shareGroup) || changed; } catch (e) { errors.push('permittedReadUserGroups: ' + e); }
-    try { changed = setAddGroupIfMissing(folder.permittedTagUserGroups, shareGroup) || changed; } catch (e) { errors.push('permittedTagUserGroups: ' + e); }
+    // Use deprecated but working fields visibleFor and updateableBy with group ID
+    try {
+        folder.visibleFor = { id: shareGroupId };
+        changed = true;
+    } catch (e) { errors.push('visibleFor: ' + e); }
+
+    try {
+        folder.updateableBy = { id: shareGroupId };
+        changed = true;
+    } catch (e) { errors.push('updateableBy: ' + e); }
 
     return { changed, errors };
 }
 
-function ensureSharedTag(name, shareGroup) {
+function ensureSharedTag(name, shareGroup, shareGroupId) {
     const candidates = entities.Tag.findByName(name, true);
     let tag = pickBestTag(candidates, shareGroup);
 
     const res = { tagName: name, existed: !!tag, created: false, shareUpdated: false, shareUpdateErrors: [] };
 
     if (!tag) { tag = new entities.Tag(name); res.created = true; }
-    const shareRes = ensureShare(tag, shareGroup);
+    const shareRes = ensureShare(tag, shareGroupId);
     res.shareUpdated = shareRes.changed;
     res.shareUpdateErrors = shareRes.errors;
 
@@ -67,7 +75,8 @@ exports.aiTool = {
 
             issueId: { type: 'string', description: 'Issue ID, e.g. DSS-123' },
             tagNames: { type: 'array', items: { type: 'string' } },
-            shareGroupName: { type: 'string', default: DEFAULT_SHARE_GROUP }
+            shareGroupName: { type: 'string', default: DEFAULT_SHARE_GROUP },
+            shareGroupId: { type: 'string', description: 'Optional: Direct Group ID. If set, shareGroupName is ignored.' }
         },
         required: ['issueId', 'tagNames']
     },
@@ -87,9 +96,21 @@ exports.aiTool = {
         const issueId = (ctx.arguments.issueId || '').trim();
         if (!issueId) throw new Error('issueId is required.');
 
-        const shareGroupName = (ctx.arguments.shareGroupName || DEFAULT_SHARE_GROUP).trim();
-        const shareGroup = entities.UserGroup.findByName(shareGroupName);
-        if (!shareGroup) throw new Error(`UserGroup not found: "${shareGroupName}"`);
+        // Use shareGroupId directly if provided, otherwise load group by name
+        let shareGroupId = (ctx.arguments.shareGroupId || '').trim();
+        let shareGroup = null;
+        let shareGroupName = '';
+
+        if (shareGroupId) {
+            // Direct ID provided - use it without loading the group
+            shareGroupName = shareGroupId; // Use ID as name for logging
+        } else {
+            // Load group by name
+            shareGroupName = (ctx.arguments.shareGroupName || DEFAULT_SHARE_GROUP).trim();
+            shareGroup = entities.UserGroup.findByName(shareGroupName);
+            if (!shareGroup) throw new Error(`UserGroup not found: "${shareGroupName}"`);
+            shareGroupId = shareGroup.id;
+        }
 
         const tagNames = distinct(asArray(ctx.arguments.tagNames).map(normalize).filter(Boolean));
 
@@ -106,7 +127,7 @@ exports.aiTool = {
         const alreadyPresent = [];
 
         tagNames.forEach(name => {
-            ensured.push(ensureSharedTag(name, shareGroup));
+            ensured.push(ensureSharedTag(name, shareGroup, shareGroupId));
             if (issue.hasTag(name, true)) alreadyPresent.push(name);
             else { issue.addTag(name); attached.push(name); }
         });
